@@ -1,5 +1,6 @@
 # Imports
 import pygame
+import pygame.freetype
 
 
 # Define constants
@@ -14,6 +15,7 @@ window_height = 600
 window = pygame.display.set_mode((window_width, window_height))
 pygame.display.set_caption('Pong via reinforcement learning')
 clock = pygame.time.Clock()
+GAME_FONT = pygame.freetype.SysFont("sans-serif", 20)
 
 
 # Config
@@ -34,7 +36,7 @@ class Ball:
         self.centre_x_pos = self.centre_x_pos + self.x_vel
         self.centre_y_pos = self.centre_y_pos + self.y_vel
 
-    def handle_bounce(self, bot_bat):
+    def handle_bounce(self, bot_bat, score):
         left_edge_pos = self.centre_x_pos - self.radius
         right_edge_pos = self.centre_x_pos + self.radius
         top_edge_pos = self.centre_y_pos - self.radius
@@ -54,11 +56,12 @@ class Ball:
             self.y_vel *= -1
             self.centre_y_pos += -top_edge_pos
 
-        # (Temporarily) reset ball at top if it falls off the bottom of the screen
+        # Reset ball at top if it falls off the bottom of the screen, decrease score
         elif bot_edge_pos >= window_height:
             self.centre_y_pos = self.radius
+            score.modify(-100)
 
-        # Handle bounce off of bottom bat
+        # Handle bounce off of bottom bat, increase score
         if (
             bot_edge_pos > bot_bat.top_edge_pos
             and left_edge_pos < bot_bat.right_edge_pos
@@ -66,6 +69,7 @@ class Ball:
         ):
             self.y_vel *= -1
             self.centre_y_pos -= bot_edge_pos - bot_bat.top_edge_pos
+            score.modify(10)
 
     def draw(self):
         pygame.draw.circle(window, self.color, (self.centre_x_pos, self.centre_y_pos), self.radius)
@@ -110,9 +114,23 @@ class Bat:
         pygame.draw.rect(window, WHITE, rectangle)
 
 
+class Score:
+    def __init__(self, x_pos, y_pos, value=0):
+        self.value = value
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+
+    def modify(self, amount):
+        self.value += amount
+
+    def draw(self):
+        GAME_FONT.render_to(window, (self.x_pos, self.y_pos),  "Score: " + str(self.value), WHITE)
+
+
 # Initial setup
 ball = Ball((window_width / 2), (window_height / 2), 10)
 bot_bat = Bat(window_height - 10, window_height, window_width / 2 - 40, window_width / 2 + 40)
+score = Score(x_pos=(window_width - 150), y_pos=10)
 appExit = False
 
 
@@ -139,12 +157,13 @@ while not appExit:
 
     bot_bat.move()
     ball.move()
-    ball.handle_bounce(bot_bat)
+    ball.handle_bounce(bot_bat, score)
 
     # Update display
     window.fill(BLACK)
     ball.draw()
     bot_bat.draw()
+    score.draw()
     pygame.display.update()
     clock.tick(60)
 
