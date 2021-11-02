@@ -19,6 +19,7 @@ clock = pygame.time.Clock()
 # Config
 bat_acceleration = 5
 
+
 # Define objects
 class Ball:
     def __init__(self, centre_x_pos, centre_y_pos, radius):
@@ -33,12 +34,13 @@ class Ball:
         self.centre_x_pos = self.centre_x_pos + self.x_vel
         self.centre_y_pos = self.centre_y_pos + self.y_vel
 
-    def handle_bounce(self):
+    def handle_bounce(self, bot_bat):
         left_edge_pos = self.centre_x_pos - self.radius
         right_edge_pos = self.centre_x_pos + self.radius
         top_edge_pos = self.centre_y_pos - self.radius
         bot_edge_pos = self.centre_y_pos + self.radius
 
+        # Handle bounce off of the sides of the screen
         if left_edge_pos <= 0:
             self.x_vel *= -1
             self.centre_x_pos += -left_edge_pos
@@ -47,17 +49,26 @@ class Ball:
             self.x_vel *= -1
             self.centre_x_pos += right_edge_pos - window_width
 
+        # (Temporarily) handle bounce off of the top of the screen
         if top_edge_pos <= 0:
             self.y_vel *= -1
             self.centre_y_pos += -top_edge_pos
 
+        # (Temporarily) reset ball at top if it falls off the bottom of the screen
         elif bot_edge_pos >= window_height:
+            self.centre_y_pos = self.radius
+
+        # Handle bounce off of bottom bat
+        if (
+            bot_edge_pos > bot_bat.top_edge_pos
+            and left_edge_pos < bot_bat.right_edge_pos
+            and right_edge_pos > bot_bat.left_edge_pos
+        ):
             self.y_vel *= -1
-            self.centre_y_pos += bot_edge_pos - window_height
+            self.centre_y_pos -= bot_edge_pos - bot_bat.top_edge_pos
 
     def draw(self):
         pygame.draw.circle(window, self.color, (self.centre_x_pos, self.centre_y_pos), self.radius)
-
 
 
 class Bat:
@@ -128,7 +139,7 @@ while not appExit:
 
     bot_bat.move()
     ball.move()
-    ball.handle_bounce()
+    ball.handle_bounce(bot_bat)
 
     # Update display
     window.fill(BLACK)
