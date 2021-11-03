@@ -19,18 +19,20 @@ GAME_FONT = pygame.freetype.SysFont("sans-serif", 20)
 
 
 # Config
-bat_acceleration = 5
+bat_acceleration = 4
+ball_x_vel = 8
+ball_y_vel = 8
 
 
 # Define objects
 class Ball:
-    def __init__(self, centre_x_pos, centre_y_pos, radius):
+    def __init__(self, centre_x_pos, centre_y_pos, radius, ball_x_vel, ball_y_vel):
         self.centre_x_pos = centre_x_pos
         self.centre_y_pos = centre_y_pos
         self.radius = radius
         self.color = WHITE
-        self.x_vel = 5
-        self.y_vel = 5
+        self.x_vel = ball_x_vel
+        self.y_vel = ball_y_vel
 
     def move(self):
         self.centre_x_pos = self.centre_x_pos + self.x_vel
@@ -49,7 +51,7 @@ class Ball:
 
         elif right_edge_pos >= window_width:
             self.x_vel *= -1
-            self.centre_x_pos += right_edge_pos - window_width
+            self.centre_x_pos -= right_edge_pos - window_width
 
         # (Temporarily) handle bounce off of the top of the screen
         if top_edge_pos <= 0:
@@ -59,7 +61,7 @@ class Ball:
         # Reset ball at top if it falls off the bottom of the screen, decrease score
         elif bot_edge_pos >= window_height:
             self.centre_y_pos = self.radius
-            score.modify(-100)
+            score.modify(-50)
 
         # Handle bounce off of bottom bat, increase score
         if (
@@ -69,7 +71,7 @@ class Ball:
         ):
             self.y_vel *= -1
             self.centre_y_pos -= bot_edge_pos - bot_bat.top_edge_pos
-            score.modify(10)
+            score.modify(25)
 
     def draw(self):
         pygame.draw.circle(window, self.color, (self.centre_x_pos, self.centre_y_pos), self.radius)
@@ -128,7 +130,7 @@ class Score:
 
 
 # Initial setup
-ball = Ball((window_width / 2), (window_height / 2), 10)
+ball = Ball((window_width / 2), 10, 10, ball_x_vel, ball_y_vel)
 bot_bat = Bat(window_height - 10, window_height, window_width / 2 - 40, window_width / 2 + 40)
 score = Score(x_pos=(window_width - 150), y_pos=10)
 appExit = False
