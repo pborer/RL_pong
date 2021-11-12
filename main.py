@@ -1,7 +1,16 @@
 # Imports
+import sys
 import pygame
 import pygame.freetype
 import random
+
+
+# Store command-line arguments
+command_line_args = sys.argv
+# Capture the agent type from the 1st command-line argument supplied, otherwise default to periodic observer type
+agent_type = sys.argv[1] if len(sys.argv) > 1 else "periodic_observer"
+if agent_type not in ["periodic_observer", "continual_observer"]:
+    agent_type = "periodic_observer"
 
 
 # Define constants
@@ -11,8 +20,8 @@ BLACK = (0, 0, 0)
 
 # Pygame setup
 pygame.init()
-window_width = 800
-window_height = 600
+window_width = 240
+window_height = 200
 window = pygame.display.set_mode((window_width, window_height))
 pygame.display.set_caption('Pong via reinforcement learning')
 clock = pygame.time.Clock()
@@ -20,9 +29,9 @@ GAME_FONT = pygame.freetype.SysFont("sans-serif", 20)
 
 
 # Config
-bat_acceleration = 4
-ball_x_vel = 8
-ball_y_vel = 8
+bat_acceleration = 5
+ball_x_vel = 5
+ball_y_vel = 5
 
 
 # Define objects
@@ -34,8 +43,10 @@ class Ball:
         self.color = WHITE
         self.x_vel = ball_x_vel
         self.y_vel = ball_y_vel
+        self.is_at_vertical_interaction = True
 
     def move(self):
+        self.is_at_vertical_interaction = False
         self.centre_x_pos = self.centre_x_pos + self.x_vel
         self.centre_y_pos = self.centre_y_pos + self.y_vel
 
@@ -58,10 +69,12 @@ class Ball:
         if top_edge_pos <= 0:
             self.y_vel *= -1
             self.centre_y_pos += -top_edge_pos
+            self.is_at_vertical_interaction = True
 
         # Reset ball at top if it falls off the bottom of the screen, decrease score
-        elif bot_edge_pos >= window_height:
+        elif bot_edge_pos > window_height:
             self.centre_y_pos = self.radius
+            self.is_at_vertical_interaction = True
             score.modify(-50)
 
         # Handle bounce off of bottom bat, increase score
@@ -72,6 +85,7 @@ class Ball:
         ):
             self.y_vel *= -1
             self.centre_y_pos -= bot_edge_pos - bot_bat.top_edge_pos
+            self.is_at_vertical_interaction = True
             score.modify(25)
 
     def draw(self):
@@ -138,7 +152,8 @@ class Score:
 
 
 class QLearner:
-    def __init__(self, alpha, epsilon, gamma, score):
+    def __init__(self, agent_type, alpha, epsilon, gamma, score):
+        self.agent_type = agent_type
         self.alpha = alpha
         self.epsilon = epsilon
         self.gamma = gamma
@@ -146,8 +161,8 @@ class QLearner:
         self.prev_state = None
         self.action = "None"
         self.q = Q()  # look-up table of state-action Q values
-        self.score_t_minus_2 = score.value  # Assume initially - preceding scores were equal to the current score
-        self.score_t_minus_1 = score.value  # Assume initially - preceding scores were equal to the current score
+        self.score_t_minus_2 = score.value  # Assume initially that preceding scores were equal to the current score
+        self.score_t_minus_1 = score.value  # Assume initially that preceding scores were equal to the current score
 
     # Get the agent's environment state - constituting: bat and ball position and ball velocities. Stored as a string.
     def get_state(self, bat, ball):
@@ -159,7 +174,7 @@ class QLearner:
         state += " ball_y_vel: " + str(ball.y_vel)
         return state
 
-    def update(self, bat, ball, score):
+    def update(self, bat, ball, score, is_greedy=False):
         # Infer that the reward for entering the previous state is equal to the delta of the game score
         prev_reward = self.score_t_minus_1 - self.score_t_minus_2
         # Update record of scores for next iteration
@@ -191,7 +206,7 @@ class QLearner:
 
         # Based on the current state, determine and update the action. This can be thought of in notational terms as:
         # a = f(s, epsilon)
-        self.action = self.actionFunction(self.state)
+        self.action = self.actionFunction(self.state, is_greedy)
 
     # actionFunction() method determines the choice of action - using epsilon greedy method
     #
@@ -199,11 +214,19 @@ class QLearner:
     # indicated by the recorded Q-values corresponding to the specified state). Exploration is enforced by instead
     # performing a random action at a proportional frequency corresponding to the value of epsilon supplied, i.e.
     # if epsilon is set to 0.1, a random action will be performed one-tenth of the time.
-    def actionFunction(self, state):
-        possible_actions = ["left", "right", "none"]
+    def actionFunction(self, state, is_greedy):
+
+        if self.agent_type == "periodic_observer":
+            possible_actions = []
+            for direction in ["left", "right"]:
+                for duration in range(0, 40):  #TODO hardocded to 40 for now - but should update to dynamically adjust
+                    possible_actions.append(direction + ":" + str(duration))
+
+        elif self.agent_type == "continual_observer":
+            possible_actions = ["left", "right", "none"]
 
         # Perform exploration via random action, proportional to the value of epsilon provided to the agent.
-        if random.random() < self.epsilon:
+        if random.random() < self.epsilon and not is_greedy:
             chosen_action = random.choice(possible_actions)
             return chosen_action
 
@@ -256,9 +279,14 @@ class Q:
 ball = Ball((window_width / 2), 10, 10, ball_x_vel, ball_y_vel)
 bot_bat = Bat(window_width / 2, window_height - 5, 80, 10)
 score = Score(x_pos=(window_width - 150), y_pos=10)
-q_learner = QLearner(alpha=0.5, epsilon=0.1, gamma=0.9, score=score)
+q_learner = QLearner(agent_type=agent_type, alpha=0.5, epsilon=0.1, gamma=0.99, score=score)
 appExit = False
-
+clock_speed_observation = 60  # Meaning apply updates no faster than 60 frames per second
+clock_speed_training = 0  # Meaning apply updates as fast as possible
+training_iterations = 0
+movement_direction = None
+remaining_movement_iterations = 0
+processing_mode = "observation"
 
 # Application loop
 while not appExit:
@@ -269,32 +297,43 @@ while not appExit:
             pygame.quit()
             quit()
 
-        # Move the bottom bat left or right if commanded by the human player
+        # If enter is pressed, perform a batch of max speed training iterations
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_LEFT:
-                bot_bat.accelerate("left")
-            if event.key == pygame.K_RIGHT:
-                bot_bat.accelerate("right")
-        if event.type == pygame.KEYUP:
-            if event.key == pygame.K_LEFT:
-                bot_bat.decelerate("left")
-            if event.key == pygame.K_RIGHT:
-                bot_bat.decelerate("right")
+            if event.key == pygame.K_RETURN:
+                processing_mode = "training"
+            if event.key == pygame.K_BACKSPACE:
+                processing_mode = "observation"
 
-    q_learner.update(bot_bat, ball, score)
+    if q_learner.agent_type == "periodic_observer":
+        if ball.is_at_vertical_interaction:
+            is_greedy = processing_mode == "observation"  # When in observation mode actions are chosen greedily
+            q_learner.update(bot_bat, ball, score, is_greedy)
+            movement_direction = q_learner.action.split(":")[0]
+            remaining_movement_iterations = int(q_learner.action.split(":")[1])
 
-    if q_learner.action == "left":
-        bot_bat.x_velocity = -bat_acceleration
-    elif q_learner.action == "right":
-        bot_bat.x_velocity = bat_acceleration
-    elif q_learner.action == "none":
-        bot_bat.x_velocity = 0
+        if movement_direction == "left" and remaining_movement_iterations > 0:
+            bot_bat.x_velocity = -bat_acceleration
+            remaining_movement_iterations -= 1
+        elif movement_direction == "right" and remaining_movement_iterations > 0:
+            bot_bat.x_velocity = bat_acceleration
+            remaining_movement_iterations -= 1
+        else:
+            bot_bat.x_velocity = 0
+
+    elif q_learner.agent_type == "continual_observer":
+        is_greedy = processing_mode == "observation"  # When in observation mode actions are chosen greedily
+        q_learner.update(bot_bat, ball, score, is_greedy)
+
+        if q_learner.action == "left":
+            bot_bat.x_velocity = -bat_acceleration
+        elif q_learner.action == "right":
+            bot_bat.x_velocity = bat_acceleration
+        elif q_learner.action == "none":
+            bot_bat.x_velocity = 0
 
     bot_bat.move()
     ball.move()
     ball.handle_bounce(bot_bat, score)
-
-    test_state = q_learner.get_state(bot_bat, ball)
 
     # Update display
     window.fill(BLACK)
@@ -302,7 +341,9 @@ while not appExit:
     bot_bat.draw()
     score.draw()
     pygame.display.update()
-    clock.tick(150)
 
-
-print("TODO")
+    # Handle variable running speed
+    if processing_mode == "training":
+        clock.tick(clock_speed_training)
+    elif processing_mode == "observation":
+        clock.tick(clock_speed_observation)
